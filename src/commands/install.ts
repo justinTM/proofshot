@@ -5,6 +5,7 @@ import * as readline from 'readline';
 import { execSync } from 'child_process';
 import chalk from 'chalk';
 import { readBundledSkill, getInlineSkillContent } from '../utils/skills.js';
+import { findExecutablePath } from '../utils/process.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,6 +41,12 @@ interface InstallResult {
   status: 'installed' | 'updated' | 'skipped' | 'failed';
   path: string;
   message?: string;
+}
+
+interface SystemPrereq {
+  name: string;
+  binary: string;
+  installHint: string;
 }
 
 export interface InstallOptions {
@@ -162,6 +169,37 @@ function filterTools(
 
 function getSkillContent(tool: ToolDefinition): string {
   return readBundledSkill(tool.bundledSkill) ?? getInlineSkillContent(tool.inlineAgent);
+}
+
+function getSystemPrereqs(): SystemPrereq[] {
+  return [
+    {
+      name: 'agent-browser',
+      binary: 'agent-browser',
+      installHint: 'Run `npm install -g agent-browser && agent-browser install`.',
+    },
+    {
+      name: 'ffmpeg',
+      binary: 'ffmpeg',
+      installHint: 'On Amazon Linux 2023, try `sudo yum install -y ffmpeg` or install a static build.',
+    },
+  ];
+}
+
+function printSystemPrereqs(): void {
+  console.log('');
+  console.log(chalk.bold('System prerequisites:'));
+  console.log('');
+
+  for (const prereq of getSystemPrereqs()) {
+    const binaryPath = findExecutablePath(prereq.binary);
+    const status = binaryPath ? chalk.green('✓') : chalk.yellow('⚠');
+    console.log(`${status} ${prereq.name}`);
+    console.log(`  Path: ${binaryPath || chalk.dim('not found')}`);
+    if (!binaryPath) {
+      console.log(`  Hint: ${chalk.dim(prereq.installHint)}`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +439,7 @@ export async function installCommand(options: InstallOptions): Promise<void> {
       console.log(chalk.yellow('No AI coding tools detected on this machine.'));
       console.log(chalk.dim('Looked for: claude, cursor, codex, gemini, windsurf, opencode'));
     }
+    printSystemPrereqs();
     return;
   }
 
@@ -473,4 +512,6 @@ export async function installCommand(options: InstallOptions): Promise<void> {
   } else {
     console.log(chalk.dim('All tools already up to date.'));
   }
+
+  printSystemPrereqs();
 }

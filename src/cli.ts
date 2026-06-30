@@ -7,6 +7,7 @@ import { cleanCommand } from './commands/clean.js';
 import { prCommand } from './commands/pr.js';
 import { execCommand } from './commands/exec.js';
 import { doctorCommand } from './commands/doctor.js';
+import { generateStoryboardArtifact } from './artifacts/storyboard.js';
 import { PROOFSHOT_VERSION } from './version.js';
 
 export function createCLI(): Command {
@@ -45,8 +46,40 @@ export function createCLI(): Command {
     .command('stop')
     .description('Stop session: stop recording, collect errors, bundle proof artifacts')
     .option('--no-close', 'Don\'t close the browser (keep it open for further use)')
+    .option('--storyboard', 'Generate a storyboard contact sheet for the session video')
     .action(async (options) => {
       await stopCommand(options);
+    });
+
+  program
+    .command('storyboard')
+    .description('Generate a storyboard contact sheet from a completed session directory')
+    .requiredOption('--input <dir>', 'Session directory containing session.webm')
+    .option('--output <file>', 'Storyboard image output path')
+    .option('--threshold <value>', 'FFmpeg scene-detection threshold', parseFloat)
+    .option('--grid <cols>x<rows>', 'Storyboard grid size', '4x5')
+    .option('--width <px>', 'Storyboard output width', parseInt)
+    .action(async (options) => {
+      try {
+        const result = generateStoryboardArtifact({
+          inputDir: options.input,
+          outputPath: options.output,
+          threshold: options.threshold,
+          grid: options.grid,
+          width: options.width,
+        });
+
+        if (!result.imagePath || !result.jsonPath) {
+          console.log('Storyboard unavailable: install ffmpeg to generate it.');
+          return;
+        }
+
+        console.log(`✓ Storyboard: ${result.imagePath}`);
+        console.log(`✓ Scenes:     ${result.jsonPath}`);
+      } catch (error: any) {
+        console.error(`✗ Storyboard generation failed: ${error?.message || String(error)}`);
+        process.exit(1);
+      }
     });
 
   program

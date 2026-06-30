@@ -100,6 +100,7 @@ Each session produces a timestamped folder in `./proofshot-artifacts/`:
 | `viewer.html` | Standalone interactive viewer with scrub bar, timeline, and Console/Server log tabs |
 | `SUMMARY.md` | Markdown report with errors, screenshots, and video |
 | `step-*.png` | Screenshots captured at key moments |
+| `storyboard.png` / `storyboard-scenes.json` | Optional FFmpeg storyboard contact sheet plus scene metadata |
 | `session-log.json` | Action timeline with timestamps and element data |
 | `server.log` | Dev server stdout/stderr (when using `--run`) |
 | `console-output.log` | Browser console output |
@@ -165,7 +166,11 @@ Stop recording, collect errors, generate proof artifacts.
 ```bash
 proofshot stop              # Stop session and close browser
 proofshot stop --no-close   # Stop but keep browser open
+proofshot stop --storyboard # Also generate a storyboard contact sheet
 ```
+
+Storyboard generation is opt-in. It uses FFmpeg scene detection, writes `storyboard.png` plus `storyboard-scenes.json`, leaves `session-log.json` unchanged, and records fallback mode explicitly when no scenes are found.
+Use `proofshot storyboard --input ./proofshot-artifacts/<session-dir>` to regenerate a storyboard from an existing session.
 
 ### `proofshot exec`
 

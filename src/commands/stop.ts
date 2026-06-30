@@ -8,6 +8,7 @@ import { closeBrowser, getConsoleErrors, getConsoleOutput, getConsoleOutputJson 
 import { stopRecording } from '../browser/capture.js';
 import { loadSession, clearSession } from '../session/state.js';
 import { writeViewer, type TimestampedLogEntry } from '../artifacts/viewer.js';
+import { generateStoryboardArtifact } from '../artifacts/storyboard.js';
 import { extractServerErrors } from '../utils/error-patterns.js';
 import { loadSessionLog } from './exec.js';
 import { estimateTokenUsage, formatTokenUsage, type TokenUsage } from '../utils/token-usage.js';
@@ -51,6 +52,7 @@ function parseTimestampedServerLog(
 
 interface StopOptions {
   noClose?: boolean;
+  storyboard?: boolean;
 }
 
 export async function stopCommand(options: StopOptions): Promise<void> {
@@ -208,6 +210,20 @@ export async function stopCommand(options: StopOptions): Promise<void> {
     tokenUsage,
   });
 
+  let storyboardImagePath: string | null = null;
+  let storyboardJsonPath: string | null = null;
+  if (options.storyboard) {
+    try {
+      const storyboardResult = generateStoryboardArtifact({
+        inputDir: sessionDir,
+      });
+      storyboardImagePath = storyboardResult.imagePath ?? null;
+      storyboardJsonPath = storyboardResult.jsonPath ?? null;
+    } catch (error: any) {
+      console.log(chalk.dim(`Storyboard failed: ${error?.message || String(error)}`));
+    }
+  }
+
   // Step 8: Clear session state
   clearSession(outputDir);
 
@@ -225,6 +241,10 @@ export async function stopCommand(options: StopOptions): Promise<void> {
     console.log(`🎬 Viewer:        ${chalk.dim(viewerPath)}`);
   } else {
     console.log(chalk.dim('Tip: Use "proofshot exec" instead of "agent-browser" to get an interactive timeline viewer.'));
+  }
+  if (storyboardImagePath && storyboardJsonPath) {
+    console.log(`🖼️  Storyboard:    ${chalk.dim(storyboardImagePath)}`);
+    console.log(`🧩 Scenes:        ${chalk.dim(storyboardJsonPath)}`);
   }
   console.log('');
   console.log(
