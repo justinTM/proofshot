@@ -442,17 +442,42 @@ function trimVideo(
     // Rename original to -raw
     fs.renameSync(videoPath, rawPath);
 
-    runCommand(
-      ffmpeg,
-      ['-i', rawPath, '-ss', trimStartSec.toFixed(2), '-to', trimEndSec.toFixed(2), '-c', 'copy', videoPath],
-      { timeout: 60000 },
-    );
+    if (
+      tryTrimCommand(ffmpeg, rawPath, videoPath, trimStartSec, trimEndSec, ['-c', 'copy']) &&
+      validateTrimmedVideo(ffmpeg, videoPath)
+    ) {
+      fs.unlinkSync(rawPath);
+      const trimmedDuration = Math.round(trimEndSec - trimStartSec);
+      console.log(chalk.dim(`Trimmed video to ${trimmedDuration}s (removed dead time)`));
+      return trimStartSec;
+    }
 
-    // Remove raw file on success
-    fs.unlinkSync(rawPath);
-    const trimmedDuration = Math.round(trimEndSec - trimStartSec);
-    console.log(chalk.dim(`Trimmed video to ${trimmedDuration}s (removed dead time)`));
-    return trimStartSec;
+    removeFile(videoPath);
+    if (
+      tryTrimCommand(ffmpeg, rawPath, videoPath, trimStartSec, trimEndSec, [
+        '-c:v',
+        'libvpx-vp9',
+        '-crf',
+        '33',
+        '-b:v',
+        '0',
+        '-c:a',
+        'libopus',
+      ]) &&
+      validateTrimmedVideo(ffmpeg, videoPath)
+    ) {
+      fs.unlinkSync(rawPath);
+      const trimmedDuration = Math.round(trimEndSec - trimStartSec);
+      console.log(chalk.dim(`Trimmed video to ${trimmedDuration}s (re-encoded dead time)`));
+      return trimStartSec;
+    }
+
+    removeFile(videoPath);
+    if (fs.existsSync(rawPath)) {
+      fs.renameSync(rawPath, videoPath);
+    }
+    console.log(chalk.dim('Video trimming failed, keeping original'));
+    return 0;
   } catch {
     // Restore original if trimming failed
     if (fs.existsSync(rawPath)) {
@@ -464,5 +489,44 @@ function trimVideo(
     }
     console.log(chalk.dim('Video trimming failed, keeping original'));
     return 0;
+  }
+}
+
+function tryTrimCommand(
+  ffmpeg: string,
+  rawPath: string,
+  videoPath: string,
+  trimStartSec: number,
+  trimEndSec: number,
+  extraArgs: string[],
+): boolean {
+  try {
+    runCommand(
+      ffmpeg,
+      ['-i', rawPath, '-ss', trimStartSec.toFixed(2), '-to', trimEndSec.toFixed(2), ...extraArgs, videoPath],
+      { timeout: 60000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validateTrimmedVideo(ffmpeg: string, videoPath: string): boolean {
+  try {
+    runCommand(ffmpeg, ['-v', 'error', '-i', videoPath, '-f', 'null', '-'], { timeout: 60000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeFile(filePath: string): void {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  } catch {
+    // Ignore cleanup failures; trimVideo will restore the raw file if needed.
   }
 }
