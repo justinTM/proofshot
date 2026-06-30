@@ -80,7 +80,7 @@ proofshot stop
 \`\`\`
 
 This stops recording, collects console + server errors, and generates
-a SUMMARY.md with video, screenshots, and error report.
+a SUMMARY.md with video, screenshots, optional storyboard contact sheet, and error report.
 
 ### Step 4 (optional): Post proof to the PR
 
@@ -89,7 +89,7 @@ proofshot pr              # Auto-detect PR from current branch
 proofshot pr 42           # Target a specific PR number
 \`\`\`
 
-This uploads screenshots and video to GitHub and posts a formatted comment on the PR with inline media. Requires \`gh\` CLI to be authenticated.
+This uploads screenshots, video, and any storyboard contact sheet to GitHub and posts a formatted comment on the PR with inline media. Requires \`gh\` CLI to be authenticated.
 Default upload mode uses the official GitHub contents API on a \`proofshot-artifacts\` branch. For GitHub-hosted attachment URLs, use \`proofshot pr --upload-provider github-web-attachments\`.
 
 ## Tips
@@ -112,8 +112,8 @@ After modifying UI files, visually verify changes with this workflow:
 1. Start session: \`proofshot start --run "your-dev-command" --port PORT --description "what you are verifying"\`
    If the server is already running, omit --run.
 2. Drive browser: Use \`proofshot exec\` commands to navigate, click, fill forms, and take screenshots
-3. Stop session: \`proofshot stop\` to bundle video + screenshots + error report
-4. (Optional) Post to PR: \`proofshot pr\` to upload proof to the GitHub PR
+3. Stop session: \`proofshot stop\` to bundle video + screenshots + error report, or add \`--storyboard\` for a contact sheet
+4. (Optional) Post to PR: \`proofshot pr\` to upload proof to the GitHub PR, including storyboard output when present
    Default provider uses the official contents API. Use \`--upload-provider github-web-attachments\` only if you specifically want GitHub attachment URLs.
 
 Key proofshot exec commands:
@@ -132,8 +132,8 @@ After building or modifying UI features, verify with this workflow:
 1. Start: \`proofshot start --run "your-dev-command" --port PORT --description "what you are verifying"\`
    If the server is already running, omit --run.
 2. Test: Use \`proofshot exec\` to navigate, click, fill forms, take screenshots
-3. Stop: \`proofshot stop\` — bundles video, screenshots, and error report
-4. (Optional) Post to PR: \`proofshot pr\` — uploads proof to the GitHub PR
+3. Stop: \`proofshot stop\` — bundles video, screenshots, error report, and optional storyboard contact sheet
+4. (Optional) Post to PR: \`proofshot pr\` — uploads proof to the GitHub PR, including storyboard output when present
    Default provider uses the official contents API. Use \`--upload-provider github-web-attachments\` only if you specifically want GitHub attachment URLs.
 
 Key proofshot exec commands:

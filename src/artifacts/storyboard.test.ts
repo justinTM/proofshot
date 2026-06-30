@@ -21,7 +21,9 @@ import { generateStoryboardArtifact } from './storyboard.js';
 describe('generateStoryboardArtifact', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    findExecutablePathMock.mockReturnValue('/usr/bin/ffmpeg');
+    findExecutablePathMock.mockImplementation((command: string) =>
+      command === 'ffprobe' ? '/usr/bin/ffprobe' : '/usr/bin/ffmpeg',
+    );
     spawnSyncMock.mockReset();
   });
 
@@ -80,6 +82,10 @@ describe('generateStoryboardArtifact', () => {
         return { stdout: '', stderr: '', status: 0, error: undefined } as never;
       }
 
+      if (args.includes('-show_entries')) {
+        return { stdout: '40.0\n', stderr: '', status: 0, error: undefined } as never;
+      }
+
       fs.writeFileSync(outputPath, 'png');
       return { stdout: '', stderr: '', status: 0, error: undefined } as never;
     });
@@ -88,9 +94,12 @@ describe('generateStoryboardArtifact', () => {
     const storyboard = JSON.parse(fs.readFileSync(path.join(sessionDir, 'storyboard-scenes.json'), 'utf8'));
 
     expect(storyboard.mode).toBe('fallback');
-    expect(storyboard.scenes).toEqual([]);
-    expect(spawnSyncMock.mock.calls).toHaveLength(2);
-    expect(spawnSyncMock.mock.calls[1][1].join(' ')).not.toContain('select=gt(scene');
+    expect(storyboard.scenes).toHaveLength(20);
+    expect(storyboard.scenes[0]).toEqual({ label: 'sample-001', timeSec: 1 });
+    expect(storyboard.scenes[19]).toEqual({ label: 'sample-020', timeSec: 39 });
+    expect(spawnSyncMock.mock.calls).toHaveLength(3);
+    expect(spawnSyncMock.mock.calls[2][1].join(' ')).toContain('fps=0.5');
+    expect(spawnSyncMock.mock.calls[2][1].join(' ')).not.toContain('select=gt(scene');
     expect(logSpy.mock.calls.flat().join('\n')).toContain('Storyboard fallback');
   });
 

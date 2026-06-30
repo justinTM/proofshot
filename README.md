@@ -193,7 +193,7 @@ proofshot diff --baseline ./previous-artifacts
 
 ### `proofshot pr`
 
-Upload session artifacts to GitHub and post a verification comment on the PR. Finds all sessions recorded on the current branch, uploads screenshots and video, and posts a formatted comment with embedded screenshots.
+Upload session artifacts to GitHub and post a verification comment on the PR. Finds all sessions recorded on the current branch, uploads screenshots, video, and storyboard contact sheets when present, and posts a formatted comment with embedded proof artifacts.
 
 ```bash
 proofshot pr              # Auto-detect PR from current branch

@@ -4,6 +4,7 @@ import {
   getShellExecutable,
   parseWindowsNetstatOutput,
   readCommandVersion,
+  runCommand,
 } from './process.js';
 
 describe('getShellExecutable', () => {
@@ -60,5 +61,18 @@ describe('readCommandVersion', () => {
 
     expect(readCommandVersion('ffmpeg', ['--version'], execSpy as never)).toBe('ffmpeg version 7.0');
     expect(execSpy).toHaveBeenCalledWith('ffmpeg --version', expect.any(Object));
+  });
+});
+
+describe('runCommand', () => {
+  it('passes arguments without shell parsing', () => {
+    const output = runCommand(process.execPath, [
+      '-e',
+      'process.stdout.write(process.argv.slice(1).join("|"))',
+      'one two',
+      'three',
+    ]);
+
+    expect(output).toBe('one two|three');
   });
 });

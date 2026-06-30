@@ -3,6 +3,7 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import chalk from 'chalk';
 import { loadConfig } from '../utils/config.js';
+import { findExecutablePath, runCommand } from '../utils/process.js';
 import {
   type GitHubUploadProvider,
   getGitHubToken,
@@ -113,17 +114,18 @@ export async function prCommand(options: PROptions): Promise<void> {
     if (fs.existsSync(mp4Path)) {
       videoPath = mp4Path;
     } else {
-      try {
-        execSync('ffmpeg -version', { stdio: 'pipe' });
+      const ffmpeg = findExecutablePath('ffmpeg');
+      if (!ffmpeg) {
+        console.log(chalk.dim('ffmpeg not available — uploading .webm directly'));
+      } else {
         console.log(chalk.dim('Converting video to .mp4...'));
-        execSync(
-          `ffmpeg -i "${videoPath}" -c:v libx264 -preset fast -crf 23 -an "${mp4Path}"`,
-          { stdio: 'pipe', timeout: 120000 },
+        runCommand(
+          ffmpeg,
+          ['-i', videoPath, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-an', mp4Path],
+          { timeout: 120000 },
         );
         videoPath = mp4Path;
         console.log(chalk.green('✓') + ' Video converted to .mp4');
-      } catch {
-        console.log(chalk.dim('ffmpeg not available — uploading .webm directly'));
       }
     }
   }
@@ -249,9 +251,14 @@ export async function prCommand(options: PROptions): Promise<void> {
 
   console.log('');
   console.log(chalk.green.bold(`✅ Posted ProofShot verification to PR #${prNumber}`));
-  console.log(
-    chalk.dim(`  ${screenshotMap.size} screenshot(s), ${video ? '1 video' : 'no video'}`),
-  );
+  const regularScreenshotCount = [...screenshotMap.keys()].filter(
+    (label) => !path.basename(label).toLowerCase().startsWith('storyboard'),
+  ).length;
+  const storyboardCount = screenshotMap.size - regularScreenshotCount;
+  const artifactSummary = `${regularScreenshotCount} screenshot(s)${
+    storyboardCount > 0 ? `, ${storyboardCount} storyboard` : ''
+  }, ${video ? '1 video' : 'no video'}`;
+  console.log(chalk.dim(`  ${artifactSummary}`));
 }
 
 /**

@@ -1,6 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
 import chalk from 'chalk';
 import { loadConfig } from '../utils/config.js';
 import { setAgentBrowserDefaults } from '../utils/exec.js';
@@ -10,6 +9,7 @@ import { loadSession, clearSession } from '../session/state.js';
 import { writeViewer, type TimestampedLogEntry } from '../artifacts/viewer.js';
 import { generateStoryboardArtifact } from '../artifacts/storyboard.js';
 import { extractServerErrors } from '../utils/error-patterns.js';
+import { findExecutablePath, runCommand } from '../utils/process.js';
 import { loadSessionLog } from './exec.js';
 import { estimateTokenUsage, formatTokenUsage, type TokenUsage } from '../utils/token-usage.js';
 
@@ -426,9 +426,8 @@ function trimVideo(
   if (trimEndSec - trimStartSec < 5) return 0;
 
   // Check if ffmpeg is available
-  try {
-    execSync('ffmpeg -version', { stdio: 'pipe' });
-  } catch {
+  const ffmpeg = findExecutablePath('ffmpeg');
+  if (!ffmpeg) {
     console.log(chalk.dim('Tip: Install ffmpeg to auto-trim dead time from videos.'));
     return 0;
   }
@@ -443,9 +442,10 @@ function trimVideo(
     // Rename original to -raw
     fs.renameSync(videoPath, rawPath);
 
-    execSync(
-      `ffmpeg -i "${rawPath}" -ss ${trimStartSec.toFixed(2)} -to ${trimEndSec.toFixed(2)} -c copy "${videoPath}"`,
-      { stdio: 'pipe', timeout: 60000 },
+    runCommand(
+      ffmpeg,
+      ['-i', rawPath, '-ss', trimStartSec.toFixed(2), '-to', trimEndSec.toFixed(2), '-c', 'copy', videoPath],
+      { timeout: 60000 },
     );
 
     // Remove raw file on success

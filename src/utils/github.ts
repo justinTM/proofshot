@@ -67,6 +67,12 @@ export function getGitHubToken(): string {
  * Get the current repo's owner, name, and numeric ID.
  */
 export async function getRepoInfo(token: string): Promise<GitHubRepo> {
+  const trackedRemoteUrl = getTrackedRemoteUrl();
+  const trackedRepo = trackedRemoteUrl ? parseGitHubRemoteUrl(trackedRemoteUrl) : null;
+  if (trackedRepo) {
+    return getRepoInfoByName(trackedRepo.owner, trackedRepo.repo, token);
+  }
+
   let nwo: string;
   try {
     nwo = execSync('gh repo view --json nameWithOwner -q .nameWithOwner', {
@@ -82,6 +88,48 @@ export async function getRepoInfo(token: string): Promise<GitHubRepo> {
 
   const [owner, repo] = nwo.split('/');
 
+  return getRepoInfoByName(owner, repo, token);
+}
+
+function getTrackedRemoteUrl(): string | null {
+  try {
+    const upstream = execSync('git rev-parse --abbrev-ref --symbolic-full-name @{u}', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    if (!upstream) return null;
+
+    const remoteName = upstream.split('/', 1)[0];
+    return execSync(`git remote get-url ${remoteName}`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+export function parseGitHubRemoteUrl(url: string): { owner: string; repo: string } | null {
+  const sshMatch = url.match(/^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/);
+  if (sshMatch) {
+    return { owner: sshMatch[1], repo: sshMatch[2] };
+  }
+
+  const httpsMatch = url.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/)?$/);
+  if (httpsMatch) {
+    return { owner: httpsMatch[1], repo: httpsMatch[2] };
+  }
+
+  const sshUrlMatch = url.match(/^ssh:\/\/git@github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/);
+  if (sshUrlMatch) {
+    return { owner: sshUrlMatch[1], repo: sshUrlMatch[2] };
+  }
+
+  return null;
+}
+
+async function getRepoInfoByName(owner: string, repo: string, token: string): Promise<GitHubRepo> {
   const repoResponse = await githubApi<{
     id: number;
     default_branch: string;

@@ -1,4 +1,4 @@
-import { execSync, spawn, type ChildProcess, type SpawnOptions } from 'child_process';
+import { execSync, spawn, spawnSync, type ChildProcess, type SpawnOptions, type SpawnSyncOptions } from 'child_process';
 
 type ExecSyncLike = typeof execSync;
 
@@ -21,6 +21,22 @@ export function spawnShellCommand(
     ...options,
     shell: getShellExecutable(),
   });
+}
+
+export function runCommand(
+  command: string,
+  args: string[] = [],
+  options: SpawnSyncOptions = {},
+): string {
+  const result = spawnSync(command, args, {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    ...options,
+  });
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(output || `Command failed: ${command}`);
+  return output;
 }
 
 export function parseWindowsNetstatOutput(output: string, port: number): number[] {

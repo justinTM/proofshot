@@ -118,6 +118,7 @@ export function extractServerErrors(log: string): string[] {
   return log.split('\n').filter((line) => {
     const trimmed = line.trim();
     if (!trimmed) return false;
+    if (/GET\s+\/favicon\.ico\s+returned\s+404/i.test(trimmed)) return false;
     return allPatterns.some((p) => p.test(trimmed));
   });
 }

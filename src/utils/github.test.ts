@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { formatPRComment } from '../artifacts/pr-format.js';
-import { getGitHubToken, uploadAsset } from './github.js';
+import { getGitHubToken, parseGitHubRemoteUrl, uploadAsset } from './github.js';
 
 describe('getGitHubToken', () => {
   afterEach(() => {
@@ -15,6 +15,19 @@ describe('getGitHubToken', () => {
     process.env.GH_TOKEN = ' env-token ';
 
     expect(getGitHubToken()).toBe('env-token');
+  });
+});
+
+describe('parseGitHubRemoteUrl', () => {
+  it('parses common GitHub SSH and HTTPS remote URLs', () => {
+    expect(parseGitHubRemoteUrl('git@github.com:AmElmo/proofshot.git')).toEqual({
+      owner: 'AmElmo',
+      repo: 'proofshot',
+    });
+    expect(parseGitHubRemoteUrl('https://github.com/justinTM/proofshot.git')).toEqual({
+      owner: 'justinTM',
+      repo: 'proofshot',
+    });
   });
 });
 
@@ -60,5 +73,44 @@ describe('formatPRComment', () => {
 
     expect(body).toContain('[Session recording](https://example.com/session.mp4)');
     expect(body).not.toContain('\nhttps://example.com/session.mp4\n');
+  });
+
+  it('renders GitHub attachment videos as embeds', () => {
+    const body = formatPRComment({
+      description: 'Verify checkout',
+      sessionCount: 1,
+      screenshots: new Map(),
+      video: {
+        url: 'https://example.com/session.mp4',
+        renderMode: 'embed',
+      },
+      errorCount: 0,
+      branch: 'feature/test',
+      commitSha: 'abcdef123456',
+    });
+
+    expect(body).toContain('\nhttps://example.com/session.mp4\n');
+    expect(body).not.toContain('[Session recording](https://example.com/session.mp4)');
+  });
+
+  it('renders storyboard images in their own section', () => {
+    const body = formatPRComment({
+      description: 'Verify checkout',
+      sessionCount: 1,
+      screenshots: new Map([
+        ['step-dashboard.png', 'https://example.com/dashboard.png'],
+        ['storyboard.png', 'https://example.com/storyboard.png'],
+      ]),
+      video: null,
+      errorCount: 0,
+      branch: 'feature/test',
+      commitSha: 'abcdef123456',
+    });
+
+    expect(body).toContain('### Storyboard');
+    expect(body).toContain('![storyboard](https://example.com/storyboard.png)');
+    expect(body).toContain('### Screenshots');
+    expect(body).toContain('![dashboard](https://example.com/dashboard.png)');
+    expect(body).not.toContain('View 2 screenshots');
   });
 });
