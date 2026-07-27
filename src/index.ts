@@ -10,3 +10,5 @@ export { writeViewer, generateViewer } from './artifacts/viewer.js';
 export type { SessionLogEntry } from './commands/exec.js';
 export { writeMetadata, loadMetadata, findSessionsForBranch, type SessionMetadata } from './session/metadata.js';
 export { formatPRComment, type PRCommentData } from './artifacts/pr-format.js';
+export * from './evidence/contract.js';
+export { compileProofBundle, sha256Digest, validateProofBundle } from './evidence/validate.js';
