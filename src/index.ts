@@ -40,3 +40,5 @@ export * from './browser/evidence.js';
 export { redactBrowserAction, redactBrowserText, redactBrowserUrl, redactBrowserValue, redactKnownBrowserSecrets } from './browser/redact.js';
 export { importAgentBrowserSession } from './browser/import-agent-browser.js';
 export { importPlaywrightTraceFixture } from './browser/import-playwright-trace.js';
+export { compileReviewBundle } from './review/compiler.js';
+export * from './review/types.js';

@@ -74,11 +74,14 @@ describe('stopCommand storyboard mode', () => {
     mocks.estimateTokenUsage.mockReturnValue(null);
     mocks.stopRecording.mockImplementation(() => {});
     mocks.closeBrowser.mockImplementation(() => {});
-    mocks.findExecutablePath.mockImplementation((command: string) =>
-      command === 'ffmpeg' ? '/usr/bin/ffmpeg' : null,
-    );
+    mocks.findExecutablePath.mockImplementation((command: string) => {
+      if (command === 'ffmpeg') return '/usr/bin/ffmpeg';
+      if (command === 'ffprobe') return '/usr/bin/ffprobe';
+      return null;
+    });
     mocks.runCommand.mockImplementation((command: string, args: string[]) => {
       const joined = args.join(' ');
+      if (command.includes('ffprobe') || joined.includes('-show_entries format=duration')) return '30.5';
       if (joined.includes('libvpx-vp9')) return 'reencoded';
       if (joined.includes('-v error -i')) {
         if (joined.includes('libvpx-vp9')) return '';
@@ -140,7 +143,26 @@ describe('stopCommand storyboard mode', () => {
 
     expect(mocks.stopRecording).not.toHaveBeenCalled();
     expect(mocks.writeViewer).toHaveBeenCalled();
-    expect(fs.readFileSync(path.join(sessionDir, 'SUMMARY.md'), 'utf8')).toContain('Not captured');
+    const summary = fs.readFileSync(path.join(sessionDir, 'SUMMARY.md'), 'utf8');
+    expect(summary).toContain('[viewer.html](./viewer.html)');
+    expect(summary).toContain('Not captured');
+  });
+
+  it('reports retained media duration separately from wall-clock duration', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-14T00:00:55.000Z').getTime());
+    try {
+      await stopCommand({ noClose: true });
+    } finally {
+      now.mockRestore();
+    }
+
+    const summary = fs.readFileSync(path.join(sessionDir, 'SUMMARY.md'), 'utf8');
+    expect(summary).toContain('(30.5s retained media)');
+    expect(summary).toContain('Session wall-clock duration: 55 seconds');
+    expect(summary).toContain('Post-trim media duration: 30.5 seconds');
+    expect(mocks.writeViewer).toHaveBeenCalledWith(sessionDir, expect.objectContaining({
+      durationSec: 30.5,
+    }));
   });
 
   it('reports blocked console collection instead of a false clean result', async () => {

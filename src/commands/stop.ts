@@ -75,7 +75,7 @@ export async function stopCommand(options: StopOptions): Promise<void> {
 
   const startTime = new Date(session.startedAt).getTime();
   const durationMs = Date.now() - startTime;
-  const durationSec = Math.round(durationMs / 1000);
+  const wallClockDurationSec = Math.round(durationMs / 1000);
 
   // Step 1: Collect console errors and output
   console.log(chalk.dim('Collecting errors...'));
@@ -153,6 +153,10 @@ export async function stopCommand(options: StopOptions): Promise<void> {
         chalk.dim('  The screencast may have been interrupted. Screenshots and logs are still saved.'),
     );
   }
+  const postTrimMediaDurationSec = fs.existsSync(session.videoPath)
+    ? probeMediaDuration(session.videoPath)
+    : null;
+  const reviewDurationSec = postTrimMediaDurationSec ?? wallClockDurationSec;
 
   // Step 6: Count errors
   const consoleErrorLines = consoleErrors
@@ -167,30 +171,8 @@ export async function stopCommand(options: StopOptions): Promise<void> {
   // Step 6.5: Estimate token usage
   const tokenUsage = estimateTokenUsage(session.sessionDir, startTime, Date.now());
 
-  // Step 7: Generate SUMMARY.md
+  // Step 7: Reserve the summary path; write it after viewer generation so it can link the viewer.
   const summaryPath = path.join(sessionDir, 'SUMMARY.md');
-  const summary = generateProofSummary({
-    description: session.description,
-    serverCommand: session.serverCommand,
-    port: session.port,
-    videoPath: session.videoPath,
-    screenshots,
-    consoleErrors,
-    consoleErrorCount,
-    serverLog,
-    serverErrorCount,
-    tokenUsage,
-    durationSec,
-    outputDir: sessionDir,
-    metadata: loadMetadata(sessionDir),
-    consoleCaptureHealth,
-    consoleCaptureReason,
-    networkCaptureHealth,
-    networkCaptureReason,
-    serverCaptureHealth,
-    serverCaptureReason,
-  });
-  fs.writeFileSync(summaryPath, summary);
 
   // Step 7.5: Generate interactive viewer (if session log exists)
   // Adjust session log timestamps to match the trimmed video
@@ -220,7 +202,7 @@ export async function stopCommand(options: StopOptions): Promise<void> {
   const viewerPath = writeViewer(sessionDir, {
     description: session.description,
     serverCommand: session.serverCommand,
-    durationSec,
+    durationSec: reviewDurationSec,
     videoFilename: fs.existsSync(session.videoPath) ? path.basename(session.videoPath) : null,
     consoleErrorCount,
     serverErrorCount,
@@ -237,6 +219,31 @@ export async function stopCommand(options: StopOptions): Promise<void> {
     serverCaptureHealth,
     serverCaptureReason,
   });
+
+  const summary = generateProofSummary({
+    description: session.description,
+    serverCommand: session.serverCommand,
+    port: session.port,
+    videoPath: session.videoPath,
+    viewerPath,
+    screenshots,
+    consoleErrors,
+    consoleErrorCount,
+    serverLog,
+    serverErrorCount,
+    tokenUsage,
+    wallClockDurationSec,
+    postTrimMediaDurationSec,
+    outputDir: sessionDir,
+    metadata: loadMetadata(sessionDir),
+    consoleCaptureHealth,
+    consoleCaptureReason,
+    networkCaptureHealth,
+    networkCaptureReason,
+    serverCaptureHealth,
+    serverCaptureReason,
+  });
+  fs.writeFileSync(summaryPath, summary);
 
   const metadata = loadMetadata(sessionDir);
   if (metadata) {
@@ -274,7 +281,7 @@ export async function stopCommand(options: StopOptions): Promise<void> {
   console.log('');
 
   if (fs.existsSync(session.videoPath)) {
-    console.log(`📹 Video:         ${chalk.dim(session.videoPath)} (${durationSec}s)`);
+    console.log(`📹 Video:         ${chalk.dim(session.videoPath)} (${reviewDurationSec}s retained media)`);
   }
   console.log(`📸 Screenshots:   ${screenshots.length} captured`);
   console.log(`📝 Summary:       ${chalk.dim(summaryPath)}`);
@@ -295,7 +302,8 @@ export async function stopCommand(options: StopOptions): Promise<void> {
   console.log(`Server errors:    ${serverCaptureHealth === 'observed'
     ? serverErrorCount === 0 ? chalk.green('0') : chalk.red(String(serverErrorCount))
     : chalk.yellow(serverCaptureHealth)}`);
-  console.log(`Duration:         ${durationSec} seconds`);
+  console.log(`Session duration: ${wallClockDurationSec} seconds`);
+  if (postTrimMediaDurationSec !== null) console.log(`Media duration:   ${postTrimMediaDurationSec} seconds`);
   console.log('');
   console.log(`Proof artifacts saved to ${chalk.dim(sessionDir)}`);
 
@@ -328,13 +336,15 @@ interface SummaryData {
   serverCommand: string | null;
   port: number;
   videoPath: string;
+  viewerPath: string | null;
   screenshots: string[];
   consoleErrors: string;
   consoleErrorCount: number;
   serverLog: string;
   serverErrorCount: number;
   tokenUsage?: TokenUsage | null;
-  durationSec: number;
+  wallClockDurationSec: number;
+  postTrimMediaDurationSec: number | null;
   outputDir: string;
   metadata: SessionMetadata | null;
   consoleCaptureHealth: CaptureHealth;
@@ -356,6 +366,8 @@ function generateProofSummary(data: SummaryData): string {
 **Dev Server:** ${data.serverCommand ? data.serverCommand : 'external'} on localhost:${data.port}
 
 `;
+
+  if (data.viewerPath) md += `**Portable viewer:** [viewer.html](./viewer.html)\n\n`;
 
   if (data.metadata?.target || data.metadata?.source || data.metadata?.runtime) {
     const target = data.metadata.target;
@@ -391,7 +403,7 @@ ${data.description}
   const relativeVideo = path.basename(data.videoPath);
   if (fs.existsSync(data.videoPath)) md += `## Video Recording
 
-Full session recording: [${relativeVideo}](./${relativeVideo}) (${data.durationSec}s)
+Full session recording: [${relativeVideo}](./${relativeVideo}) (${data.postTrimMediaDurationSec ?? 'unknown'}s retained media)
 
 `;
   else md += `## Video Recording\n\nNot captured. This session used explicit no-video mode or recording did not produce a file.\n\n`;
@@ -445,10 +457,30 @@ Full session recording: [${relativeVideo}](./${relativeVideo}) (${data.durationS
   md += `## Environment
 - Browser: Chromium (headless)
 - Viewport: 1280x720
-- Duration: ${data.durationSec} seconds
+- Session wall-clock duration: ${data.wallClockDurationSec} seconds
+- Post-trim media duration: ${data.postTrimMediaDurationSec === null ? 'not recorded' : `${data.postTrimMediaDurationSec} seconds`}
 `;
 
   return md;
+}
+
+function probeMediaDuration(videoPath: string): number | null {
+  const ffprobe = findExecutablePath('ffprobe');
+  if (!ffprobe) return null;
+  try {
+    const output = runCommand(ffprobe, [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      videoPath,
+    ], { timeout: 30000 });
+    const duration = Number(output.trim());
+    return Number.isFinite(duration) && duration >= 0
+      ? Number(duration.toFixed(3))
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
