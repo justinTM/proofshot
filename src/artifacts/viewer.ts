@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { SessionLogEntry } from '../commands/exec.js';
+import type { CaptureHealth } from '../browser/evidence.js';
 
 export interface TimestampedLogEntry {
   text: string;
@@ -26,6 +27,12 @@ interface ViewerData {
     estimatedCost: number;
     source: string;
   } | null;
+  consoleCaptureHealth?: CaptureHealth;
+  consoleCaptureReason?: string;
+  networkCaptureHealth?: CaptureHealth;
+  networkCaptureReason?: string;
+  serverCaptureHealth?: CaptureHealth;
+  serverCaptureReason?: string;
 }
 
 /** Maximum log size embedded in the viewer HTML (50 KB). */
@@ -157,15 +164,25 @@ export function generateViewer(data: ViewerData): string {
     ? `<p class="description" id="description"><span class="description-text">${escapeHtml(data.description)}</span><button class="show-more" id="showMoreBtn" style="display:none" onclick="toggleDescription()">Show more</button></p>`
     : '';
 
-  const consoleBadgeClass = data.consoleErrorCount === 0 ? 'clean' : 'has-errors';
-  const consoleBadgeText =
-    data.consoleErrorCount === 0
+  const consoleCaptureHealth = data.consoleCaptureHealth ?? 'observed';
+  const consoleBadgeClass = consoleCaptureHealth !== 'observed'
+    ? 'unknown'
+    : data.consoleErrorCount === 0 ? 'clean' : 'has-errors';
+  const consoleBadgeText = consoleCaptureHealth !== 'observed'
+    ? `Console: ${consoleCaptureHealth}`
+    : data.consoleErrorCount === 0
       ? 'Console: clean'
       : `Console: ${data.consoleErrorCount} error(s)`;
+  const networkCaptureHealth = data.networkCaptureHealth ?? 'not_observed';
+  const networkBadgeText = `Network: ${networkCaptureHealth}`;
 
-  const serverBadgeClass = data.serverErrorCount === 0 ? 'clean' : 'has-errors';
-  const serverBadgeText =
-    data.serverErrorCount === 0
+  const serverCaptureHealth = data.serverCaptureHealth ?? 'observed';
+  const serverBadgeClass = serverCaptureHealth !== 'observed'
+    ? 'unknown'
+    : data.serverErrorCount === 0 ? 'clean' : 'has-errors';
+  const serverBadgeText = serverCaptureHealth !== 'observed'
+    ? `Server: ${serverCaptureHealth}`
+    : data.serverErrorCount === 0
       ? 'Server: clean'
       : `Server: ${data.serverErrorCount} error(s)`;
 
@@ -458,6 +475,12 @@ export function generateViewer(data: ViewerData): string {
       border: 1px solid rgba(248, 81, 73, 0.25);
     }
 
+    .error-badge.unknown {
+      background: rgba(210, 153, 34, 0.14);
+      color: #e3b341;
+      border: 1px solid rgba(210, 153, 34, 0.35);
+    }
+
     .error-badge .badge-dot {
       width: 6px;
       height: 6px;
@@ -470,6 +493,10 @@ export function generateViewer(data: ViewerData): string {
 
     .error-badge.has-errors .badge-dot {
       background: #f85149;
+    }
+
+    .error-badge.unknown .badge-dot {
+      background: #e3b341;
     }
 
     .viewer {
@@ -937,8 +964,9 @@ export function generateViewer(data: ViewerData): string {
     ${descriptionHtml}
     <p class="meta">${escapeHtml(date)} &middot; ${data.durationSec}s</p>
     <div class="error-badges">
-      <button class="error-badge ${consoleBadgeClass}" onclick="switchTab('console')"><span class="badge-dot"></span>${consoleBadgeText}</button>
-      <button class="error-badge ${serverBadgeClass}" onclick="switchTab('server')"><span class="badge-dot"></span>${serverBadgeText}</button>
+      <button type="button" class="error-badge ${consoleBadgeClass}" title="${escapeHtml(data.consoleCaptureReason ?? '')}" onclick="switchTab('console')"><span class="badge-dot"></span>${consoleBadgeText}</button>
+      <button type="button" class="error-badge ${serverBadgeClass}" title="${escapeHtml(data.serverCaptureReason ?? '')}" onclick="switchTab('server')"><span class="badge-dot"></span>${serverBadgeText}</button>
+      <span class="error-badge unknown" title="${escapeHtml(data.networkCaptureReason ?? '')}" style="cursor:default"><span class="badge-dot"></span>${networkBadgeText}</span>
     </div>
     ${tokenUsageHtml}
   </div>

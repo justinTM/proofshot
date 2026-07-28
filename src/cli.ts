@@ -96,8 +96,16 @@ export function createCLI(): Command {
     .option('--headed', 'Show browser window for debugging')
     .option('--output <dir>', 'Custom output directory')
     .option('--url <url>', 'Open this URL instead of the root')
+    .option('--target-class <class>', 'Proof boundary: local or deployed_readonly')
+    .option('--deployment-id <id>', 'Immutable deployed-target identity')
+    .option('--build-id <id>', 'Immutable deployed build identity')
+    .option('--source-revision <revision>', 'Source revision rendered by a deployed target')
     .option('--force', 'Override a stale session without running stop first')
+    .option('--no-video', 'Collect browser, logs, and screenshots without recording video')
     .action(async (options) => {
+      if (options.targetClass && !['local', 'deployed_readonly'].includes(options.targetClass)) {
+        throw new Error('--target-class must be local or deployed_readonly');
+      }
       await startCommand(options);
     });
 

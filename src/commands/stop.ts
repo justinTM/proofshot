@@ -12,6 +12,8 @@ import { extractServerErrors } from '../utils/error-patterns.js';
 import { findExecutablePath, runCommand } from '../utils/process.js';
 import { loadSessionLog } from './exec.js';
 import { estimateTokenUsage, formatTokenUsage, type TokenUsage } from '../utils/token-usage.js';
+import { loadMetadata, writeMetadata, type SessionMetadata } from '../session/metadata.js';
+import type { CaptureHealth } from '../browser/evidence.js';
 
 /**
  * Parse server.log lines with "epochMs\ttext" format.
@@ -80,6 +82,8 @@ export async function stopCommand(options: StopOptions): Promise<void> {
   let consoleErrors = '';
   let consoleOutput = '';
   let consoleEntries: TimestampedLogEntry[] = [];
+  let consoleCaptureHealth: CaptureHealth = 'not_observed';
+  let consoleCaptureReason = 'Console collection did not run';
   try {
     consoleErrors = getConsoleErrors(session.sessionName);
     consoleOutput = getConsoleOutput(session.sessionName);
@@ -89,9 +93,14 @@ export async function stopCommand(options: StopOptions): Promise<void> {
       text: `[${msg.type}] ${msg.text}`,
       relativeTimeSec: Math.max(0, parseFloat(((msg.timestamp - startTime) / 1000).toFixed(1))),
     }));
-  } catch {
-    // Browser may already be closed
+    consoleCaptureHealth = 'observed';
+    consoleCaptureReason = '';
+  } catch (error: any) {
+    consoleCaptureHealth = 'blocked';
+    consoleCaptureReason = `Console collection failed: ${error?.message || String(error)}`;
   }
+  const networkCaptureHealth: CaptureHealth = 'not_observed';
+  const networkCaptureReason = 'Network collection is not configured for this session';
 
   // Write console output to file (before closing browser)
   if (consoleOutput.trim()) {
@@ -99,8 +108,10 @@ export async function stopCommand(options: StopOptions): Promise<void> {
   }
 
   // Step 2: Stop recording
-  console.log(chalk.dim('Stopping recording...'));
-  stopRecording(session.sessionName);
+  if (session.videoEnabled !== false) {
+    console.log(chalk.dim('Stopping recording...'));
+    stopRecording(session.sessionName);
+  }
 
   // Step 3: Close browser (unless --no-close)
   if (!options.noClose) {
@@ -111,11 +122,15 @@ export async function stopCommand(options: StopOptions): Promise<void> {
   // Step 4: Read server log (with timestamp parsing)
   let serverLog = '';
   let serverEntries: TimestampedLogEntry[] = [];
+  let serverCaptureHealth: CaptureHealth = 'not_observed';
+  let serverCaptureReason = 'No ProofShot-managed server log was available';
   if (fs.existsSync(session.serverErrorLog)) {
     const rawServerLog = fs.readFileSync(session.serverErrorLog, 'utf-8');
     const parsed = parseTimestampedServerLog(rawServerLog, startTime);
     serverLog = parsed.cleanText;
     serverEntries = parsed.entries;
+    serverCaptureHealth = 'observed';
+    serverCaptureReason = '';
   }
 
   // Use session subfolder for all artifacts
@@ -167,6 +182,13 @@ export async function stopCommand(options: StopOptions): Promise<void> {
     tokenUsage,
     durationSec,
     outputDir: sessionDir,
+    metadata: loadMetadata(sessionDir),
+    consoleCaptureHealth,
+    consoleCaptureReason,
+    networkCaptureHealth,
+    networkCaptureReason,
+    serverCaptureHealth,
+    serverCaptureReason,
   });
   fs.writeFileSync(summaryPath, summary);
 
@@ -208,7 +230,26 @@ export async function stopCommand(options: StopOptions): Promise<void> {
     serverEntries: viewerServerEntries.length > 0 ? viewerServerEntries : undefined,
     entries: viewerEntries.length > 0 ? viewerEntries : undefined,
     tokenUsage,
+    consoleCaptureHealth,
+    consoleCaptureReason,
+    networkCaptureHealth,
+    networkCaptureReason,
+    serverCaptureHealth,
+    serverCaptureReason,
   });
+
+  const metadata = loadMetadata(sessionDir);
+  if (metadata) {
+    writeMetadata(sessionDir, {
+      ...metadata,
+      captureHealth: {
+        console: consoleCaptureHealth,
+        network: networkCaptureHealth,
+        ...(consoleCaptureReason ? { consoleReason: consoleCaptureReason } : {}),
+        ...(networkCaptureReason ? { networkReason: networkCaptureReason } : {}),
+      },
+    });
+  }
 
   let storyboardImagePath: string | null = null;
   let storyboardJsonPath: string | null = null;
@@ -247,12 +288,13 @@ export async function stopCommand(options: StopOptions): Promise<void> {
     console.log(`🧩 Scenes:        ${chalk.dim(storyboardJsonPath)}`);
   }
   console.log('');
-  console.log(
-    `Console errors:   ${consoleErrorCount === 0 ? chalk.green('0') : chalk.red(String(consoleErrorCount))}`,
-  );
-  console.log(
-    `Server errors:    ${serverErrorCount === 0 ? chalk.green('0') : chalk.red(String(serverErrorCount))}`,
-  );
+  console.log(`Console errors:   ${consoleCaptureHealth === 'observed'
+    ? consoleErrorCount === 0 ? chalk.green('0') : chalk.red(String(consoleErrorCount))
+    : chalk.yellow(consoleCaptureHealth)}`);
+  console.log(`Network capture:  ${chalk.yellow(networkCaptureHealth)}`);
+  console.log(`Server errors:    ${serverCaptureHealth === 'observed'
+    ? serverErrorCount === 0 ? chalk.green('0') : chalk.red(String(serverErrorCount))
+    : chalk.yellow(serverCaptureHealth)}`);
   console.log(`Duration:         ${durationSec} seconds`);
   console.log('');
   console.log(`Proof artifacts saved to ${chalk.dim(sessionDir)}`);
@@ -294,6 +336,13 @@ interface SummaryData {
   tokenUsage?: TokenUsage | null;
   durationSec: number;
   outputDir: string;
+  metadata: SessionMetadata | null;
+  consoleCaptureHealth: CaptureHealth;
+  consoleCaptureReason: string;
+  networkCaptureHealth: CaptureHealth;
+  networkCaptureReason: string;
+  serverCaptureHealth: CaptureHealth;
+  serverCaptureReason: string;
 }
 
 function generateProofSummary(data: SummaryData): string {
@@ -308,6 +357,28 @@ function generateProofSummary(data: SummaryData): string {
 
 `;
 
+  if (data.metadata?.target || data.metadata?.source || data.metadata?.runtime) {
+    const target = data.metadata.target;
+    const source = data.metadata.source;
+    const runtime = data.metadata.runtime;
+    md += `## Provenance\n\n`;
+    if (target) {
+      md += `- Target boundary: ${target.class}\n- Target URL: ${target.url}\n- Target origin: ${target.origin}\n`;
+      if (target.deploymentId) md += `- Deployment: ${target.deploymentId}\n`;
+      if (target.buildId) md += `- Build: ${target.buildId}\n`;
+      md += `- Rendered source: ${target.sourceRevision ?? 'not comparable'}\n`;
+      if (target.sourceDiffDigest) md += `- Rendered dirty diff: ${target.sourceDiffDigest}\n`;
+    }
+    if (source?.kind === 'git') {
+      md += `- Observed source: ${source.repository} @ ${source.head}\n- Worktree: ${source.worktree}\n`;
+      if (source.diffDigest) md += `- Observed dirty diff: ${source.diffDigest}\n`;
+    } else if (source) {
+      md += `- Observed source: ${source.locator ?? source.contentDigest ?? 'non-Git source'}\n`;
+    }
+    if (runtime) md += `- Runtime: ${runtime.browser.name} via ${runtime.driver.name}${runtime.driver.version ? ` ${runtime.driver.version}` : ''}\n`;
+    md += `\n`;
+  }
+
   if (data.description) {
     md += `## What Was Verified
 
@@ -318,11 +389,12 @@ ${data.description}
 
   // Video
   const relativeVideo = path.basename(data.videoPath);
-  md += `## Video Recording
+  if (fs.existsSync(data.videoPath)) md += `## Video Recording
 
 Full session recording: [${relativeVideo}](./${relativeVideo}) (${data.durationSec}s)
 
 `;
+  else md += `## Video Recording\n\nNot captured. This session used explicit no-video mode or recording did not produce a file.\n\n`;
 
   // Screenshots
   if (data.screenshots.length > 0) {
@@ -338,17 +410,23 @@ Full session recording: [${relativeVideo}](./${relativeVideo}) (${data.durationS
   md += `## Console Errors
 
 `;
-  if (data.consoleErrorCount === 0) {
+  if (data.consoleCaptureHealth !== 'observed') {
+    md += `Status: **${data.consoleCaptureHealth}**. ${data.consoleCaptureReason}\n\nNo clean console result is claimed.\n\n`;
+  } else if (data.consoleErrorCount === 0) {
     md += `No console errors detected.\n\n`;
   } else {
     md += `${data.consoleErrorCount} error(s) detected:\n\n\`\`\`\n${data.consoleErrors}\n\`\`\`\n\n`;
   }
 
+  md += `## Network Capture\n\nStatus: **${data.networkCaptureHealth}**. ${data.networkCaptureReason}\n\n`;
+
   // Server errors
   md += `## Server Errors
 
 `;
-  if (data.serverErrorCount === 0) {
+  if (data.serverCaptureHealth !== 'observed') {
+    md += `Status: **${data.serverCaptureHealth}**. ${data.serverCaptureReason}\n\nNo clean server result is claimed.\n\n`;
+  } else if (data.serverErrorCount === 0) {
     md += `No server errors detected.\n\n`;
   } else {
     md += `${data.serverErrorCount} error(s) detected:\n\n\`\`\`\n${data.serverLog.slice(0, 5000)}\n\`\`\`\n\n`;

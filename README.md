@@ -143,7 +143,13 @@ proofshot start --description "Verify checkout flow"    # Add description to rep
 proofshot start --url http://localhost:3000/login       # Open specific URL
 proofshot start --headed                                # Show browser (debugging)
 proofshot start --force                                 # Override a stale session from a previous crash
+proofshot start --no-video                              # Keep logs/screenshots without recording video
+proofshot start --url https://review.example/app \
+  --target-class deployed_readonly --deployment-id deploy-42 \
+  --build-id build-42 --source-revision 0123456789abcdef
 ```
+
+Deployed read-only proof requires deployment, build, and rendered-source identity. Native sessions report unavailable console/network collection as blocked or not observed rather than as a clean result.
 
 You can also configure browser launch behavior in `proofshot.config.json`:
 

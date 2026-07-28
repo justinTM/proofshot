@@ -66,13 +66,18 @@ describe('readCommandVersion', () => {
 
 describe('runCommand', () => {
   it('passes arguments without shell parsing', () => {
-    const output = runCommand(process.execPath, [
+    const spawnFn = vi.fn().mockReturnValue({ stdout: 'one two|three', stderr: '', status: 0 });
+    const args = [
       '-e',
       'process.stdout.write(process.argv.slice(1).join("|"))',
       'one two',
       'three',
-    ]);
+    ];
+    const output = runCommand(process.execPath, args, {}, spawnFn);
 
     expect(output).toBe('one two|three');
+    expect(spawnFn).toHaveBeenCalledWith(process.execPath, args, expect.objectContaining({
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }));
   });
 });

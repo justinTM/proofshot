@@ -12,6 +12,7 @@ export { writeMetadata, loadMetadata, findSessionsForBranch, type SessionMetadat
 export { formatPRComment, type PRCommentData } from './artifacts/pr-format.js';
 export * from './evidence/contract.js';
 export { compileProofBundle, sha256Digest, validateProofBundle } from './evidence/validate.js';
+export { captureSourceIdentity } from './evidence/source.js';
 export {
   captureTerminal,
   type CaptureTerminalOptions,
@@ -35,3 +36,7 @@ export {
   type RedactionPolicy,
 } from './terminal/redact.js';
 export * from './terminal/types.js';
+export * from './browser/evidence.js';
+export { redactBrowserAction, redactBrowserText, redactBrowserUrl, redactBrowserValue, redactKnownBrowserSecrets } from './browser/redact.js';
+export { importAgentBrowserSession } from './browser/import-agent-browser.js';
+export { importPlaywrightTraceFixture } from './browser/import-playwright-trace.js';

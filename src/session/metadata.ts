@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import type { SourceIdentity } from '../evidence/contract.js';
+import type { BrowserRuntimeProvenance, BrowserTargetProvenance, CaptureHealth } from '../browser/evidence.js';
 
 const METADATA_FILENAME = 'metadata.json';
 
@@ -8,6 +10,15 @@ export interface SessionMetadata {
   commitSha: string;
   startedAt: string;
   description: string | null;
+  source?: SourceIdentity;
+  target?: BrowserTargetProvenance;
+  runtime?: BrowserRuntimeProvenance;
+  captureHealth?: {
+    console: CaptureHealth;
+    network: CaptureHealth;
+    consoleReason?: string;
+    networkReason?: string;
+  };
 }
 
 /**
