@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { readFile } from 'node:fs/promises';
 import { installCommand } from './commands/install.js';
 import { startCommand } from './commands/start.js';
 import { stopCommand } from './commands/stop.js';
@@ -9,6 +10,7 @@ import { execCommand } from './commands/exec.js';
 import { doctorCommand } from './commands/doctor.js';
 import { generateStoryboardArtifact } from './artifacts/storyboard.js';
 import { PROOFSHOT_VERSION } from './version.js';
+import { importOdoCliMatrix } from './terminal/import-odo.js';
 
 export function createCLI(): Command {
   const program = new Command();
@@ -17,6 +19,63 @@ export function createCLI(): Command {
     .name('proofshot')
     .description('Visual verification for AI coding agents')
     .version(PROOFSHOT_VERSION);
+
+  program
+    .command('import-odo')
+    .description('Import completed ODO cli_matrix runs.jsonl as portable terminal evidence (video not required)')
+    .requiredOption('--input <runs.jsonl>', 'ODO cli_matrix RunResult JSONL')
+    .requiredOption('--output <directory>', 'Portable machine bundle output directory')
+    .requiredOption('--cwd <directory>', 'Recorded scenario working directory')
+    .option('--terminal-mode <mode>', 'Declared fallback terminal mode: pipe or pty')
+    .option('--terminal-contexts <file>', 'JSON object keyed by runner, scenario, or runner:scenario')
+    .option('--rows <number>', 'PTY rows', parseInt)
+    .option('--columns <number>', 'Terminal columns', parseInt)
+    .option('--color <mode>', 'Color behavior: auto, always, or never', 'auto')
+    .option('--glyphs <mode>', 'Glyph behavior: unicode or ascii', 'unicode')
+    .option('--artifacts <file>', 'JSON object mapping scenario IDs to generated file/URL captures')
+    .option('--keystrokes <file>', 'JSON object mapping scenario IDs to sanitized keystroke inputs')
+    .option('--env <name...>', 'Allowlisted environment names to record from the current process')
+    .action(async (options) => {
+      if (options.terminalMode && !['pipe', 'pty'].includes(options.terminalMode)) {
+        throw new Error('--terminal-mode must be pipe or pty');
+      }
+      if (!options.terminalMode && !options.terminalContexts) {
+        throw new Error('Declare --terminal-mode or provide --terminal-contexts');
+      }
+      if (!['auto', 'always', 'never'].includes(options.color)) {
+        throw new Error('--color must be auto, always, or never');
+      }
+      if (!['unicode', 'ascii'].includes(options.glyphs)) {
+        throw new Error('--glyphs must be unicode or ascii');
+      }
+      if ((options.rows !== undefined && (!Number.isInteger(options.rows) || options.rows <= 0))
+        || (options.columns !== undefined && (!Number.isInteger(options.columns) || options.columns <= 0))) {
+        throw new Error('--rows and --columns must be positive integers');
+      }
+      const readJson = async (file: string | undefined) => file
+        ? JSON.parse(await readFile(file, 'utf8'))
+        : undefined;
+      const environment = Object.fromEntries(
+        (options.env ?? []).flatMap((name: string) => process.env[name] === undefined ? [] : [[name, process.env[name] as string]]),
+      );
+      const result = await importOdoCliMatrix({
+        input: options.input, outputDirectory: options.output, cwd: options.cwd,
+        terminalMode: options.terminalMode,
+        terminalContexts: await readJson(options.terminalContexts),
+        rows: options.rows,
+        columns: options.columns,
+        color: options.color === 'auto' ? undefined : options.color === 'always',
+        glyphs: options.glyphs,
+        generatedArtifacts: await readJson(options.artifacts),
+        keystrokes: await readJson(options.keystrokes),
+        environment,
+      });
+      console.log(JSON.stringify({
+        bundle: `${options.output}/bundle.json`,
+        manifest: `${options.output}/manifest.json`,
+        observations: result.observations.length,
+      }));
+    });
 
   program
     .command('install')
@@ -37,8 +96,16 @@ export function createCLI(): Command {
     .option('--headed', 'Show browser window for debugging')
     .option('--output <dir>', 'Custom output directory')
     .option('--url <url>', 'Open this URL instead of the root')
+    .option('--target-class <class>', 'Proof boundary: local or deployed_readonly')
+    .option('--deployment-id <id>', 'Immutable deployed-target identity')
+    .option('--build-id <id>', 'Immutable deployed build identity')
+    .option('--source-revision <revision>', 'Source revision rendered by a deployed target')
     .option('--force', 'Override a stale session without running stop first')
+    .option('--no-video', 'Collect browser, logs, and screenshots without recording video')
     .action(async (options) => {
+      if (options.targetClass && !['local', 'deployed_readonly'].includes(options.targetClass)) {
+        throw new Error('--target-class must be local or deployed_readonly');
+      }
       await startCommand(options);
     });
 

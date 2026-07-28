@@ -34,7 +34,7 @@ proofshot install --force            # Overwrite existing installations
 
 ## `proofshot start`
 
-Start a verification session. Opens a browser, begins video recording, and optionally starts your dev server.
+Start a verification session. Opens a browser, records video by default, and optionally starts your dev server.
 
 ```sh
 proofshot start [options]
@@ -45,8 +45,13 @@ proofshot start [options]
 | `--run <command>` | Shell command to start your dev server | — |
 | `--port <port>` | Port your dev server runs on | `3000` |
 | `--url <url>` | URL to open instead of the root | `http://localhost:<port>` |
+| `--target-class <class>` | Proof boundary: `local` or `deployed_readonly` | Inferred from URL |
+| `--deployment-id <id>` | Immutable deployment identity for a deployed target | Required when deployed |
+| `--build-id <id>` | Immutable build identity for a deployed target | Required when deployed |
+| `--source-revision <revision>` | Exact source rendered by a deployed target | Required when deployed |
 | `--description <text>` | Description of what you're verifying (appears in reports) | — |
 | `--headed` | Show the browser window (visible Chromium) | `false` |
+| `--no-video` | Skip video while retaining browser actions, logs, and screenshots | `false` |
 | `--output <dir>` | Custom output directory for artifacts | `./proofshot-artifacts` |
 
 **Examples:**
@@ -57,14 +62,18 @@ proofshot start --run "npm run dev" --port 3000             # Start server, capt
 proofshot start --url http://localhost:3000/login            # Open a specific page
 proofshot start --description "Verify checkout flow"        # Add description to report
 proofshot start --headed                                    # Show the browser window
+proofshot start --no-video                                  # Reviewable bundle without video
+proofshot start --url https://review.example/app \
+  --target-class deployed_readonly --deployment-id deploy-42 \
+  --build-id build-42 --source-revision 0123456789abcdef     # Exact live read-only boundary
 ```
 
 **What happens:**
 1. If `--run` is provided: starts the dev server, pipes output to `server.log`, waits for the port
 2. Opens headless Chromium via agent-browser
 3. Navigates to `--url` (or `http://localhost:<port>`)
-4. Starts video recording (retries up to 3 times)
-5. Writes `.session.json` and `metadata.json` (git branch and commit SHA)
+4. Starts video recording (retries up to 3 times), unless `--no-video` is explicit
+5. Writes `.session.json` and `metadata.json` with target, deployment/build, browser/driver, and clean-or-dirty source identity
 
 ---
 
@@ -81,13 +90,15 @@ proofshot stop [options]
 | `--no-close` | Keep the browser open after stopping | `false` |
 
 **What happens:**
-1. Collects console errors and output from the browser
+1. Collects console errors and output from the browser; collection failure is reported as blocked, never clean
 2. Stops video recording
 3. Closes the browser (unless `--no-close`)
 4. Trims video dead time (requires ffmpeg): 5s buffer before first action, 3s after last
 5. Scans `server.log` for errors across 10+ languages
 6. Generates `SUMMARY.md` and `viewer.html`
 7. Clears `.session.json`
+
+Network collection is currently explicit `not_observed` in native sessions unless imported evidence supplies it.
 
 ---
 
@@ -109,9 +120,10 @@ proofshot exec scroll down
 proofshot exec press Enter
 ```
 
-Every `exec` call appends an entry to `session-log.json` with:
+After execution, every `exec` call appends a redacted entry to `session-log.json` with:
 - Relative timestamp from session start
-- The command and arguments
+- Structured precondition, attempted action, completed outcome, and postcondition
+- Exit code, signal, timeout, stdout, stderr, and timing (including failures)
 - Element bounding box and label (for `click`, `fill`, `type` targeting `@eN` refs)
 
 This data powers the interactive viewer's timeline and overlays.

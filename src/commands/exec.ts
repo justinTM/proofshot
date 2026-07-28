@@ -1,9 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { loadConfig } from '../utils/config.js';
 import { ab, buildAgentBrowserCommand, setAgentBrowserDefaults } from '../utils/exec.js';
 import { loadSession, saveSession, type SessionState } from '../session/state.js';
+import { redactBrowserAction, redactBrowserText } from '../browser/redact.js';
 
 const SESSION_LOG_FILENAME = 'session-log.json';
 
@@ -16,6 +17,21 @@ export interface SessionLogEntry {
     bbox: { x: number; y: number; width: number; height: number };
     viewport: { width: number; height: number };
   };
+  structuredAction?: { command: string; args: string[]; redacted: boolean };
+  precondition?: { sessionActive: boolean; element?: SessionLogEntry['element'] };
+  attemptedAction?: { status: 'attempted'; at: string };
+  outcome?: {
+    status: 'completed' | 'failed' | 'timed_out';
+    startedAt: string;
+    completedAt: string;
+    durationMs: number;
+    exitCode: number | null;
+    signal: string | null;
+    timeout: boolean;
+    stdout: string;
+    stderr: string;
+  };
+  postcondition?: { commandCompleted: boolean; screenshotExists?: boolean };
 }
 
 /**
@@ -170,13 +186,14 @@ function isRefTargetedAction(args: string[]): boolean {
  * 1. Read session state to get sessionDir and startedAt
  * 2. For screenshot commands, resolve paths into the session dir
  * 3. For ref-targeted actions, capture element bbox + label BEFORE execution
- * 4. Calculate timestamp relative to session start
- * 5. Append entry to session-log.json
- * 6. Pass through to agent-browser and return its output
+ * 4. Execute the action and capture its completed process outcome
+ * 5. Redact and append precondition/action/outcome/postcondition to session-log.json
+ * 6. Pass output through and preserve failure exit status
  * 7. If action was `set viewport`, update cached viewport in session state
  */
-export async function execCommand(args: string[]): Promise<void> {
-  const action = args.join(' ');
+export async function execCommand(args: string[], run = spawnSync): Promise<void> {
+  const redactedAction = redactBrowserAction(args);
+  const action = redactedAction.action;
 
   // Load session state
   const config = loadConfig();
@@ -184,7 +201,7 @@ export async function execCommand(args: string[]): Promise<void> {
   const outputDir = path.resolve(config.output);
   const session = loadSession(outputDir);
 
-  if (session && !session.recordingActive) {
+  if (session && !session.recordingActive && session.videoEnabled !== false) {
     console.error(
       'Error: Session has no active recording. Video capture is required.\n' +
         'Run "proofshot stop" to end this session, then start a new one.',
@@ -207,52 +224,54 @@ export async function execCommand(args: string[]): Promise<void> {
     if (captured) elementData = captured;
   }
 
-  // Log the action if a session is active
-  if (session) {
-    const now = new Date();
-    const startTime = new Date(session.startedAt).getTime();
-    const relativeTimeSec = parseFloat(((now.getTime() - startTime) / 1000).toFixed(1));
-
-    const entry: SessionLogEntry = {
-      action,
-      relativeTimeSec,
-      timestamp: now.toISOString(),
-    };
-    if (elementData) {
-      entry.element = elementData;
-    }
-
-    const logPath = path.join(session.sessionDir, SESSION_LOG_FILENAME);
-    const entries = loadSessionLog(session.sessionDir);
-    entries.push(entry);
-    fs.writeFileSync(logPath, JSON.stringify(entries, null, 2) + '\n');
-  }
-
   // Build shell command with proper quoting
   const shellCmd = buildShellCommand(resolvedArgs, session?.sessionName);
+  const startedAt = new Date();
+  const result = run(shellCmd, {
+    encoding: 'utf-8', timeout: 60000, stdio: ['pipe', 'pipe', 'pipe'], shell: true,
+  });
+  const completedAt = new Date();
+  const rawStdout = result.stdout?.toString() ?? '';
+  const rawStderr = result.stderr?.toString() ?? '';
+  const stdout = redactedAction.redactOutput && rawStdout
+    ? '[REDACTED]'
+    : redactBrowserText(rawStdout, redactedAction.secretValues);
+  const stderr = redactedAction.redactOutput && rawStderr
+    ? '[REDACTED]'
+    : redactBrowserText(rawStderr, redactedAction.secretValues);
+  const timedOut = result.error != null && (result.error as NodeJS.ErrnoException).code === 'ETIMEDOUT';
+  const succeeded = result.status === 0 && !result.error;
 
-  // Pass through to agent-browser
-  try {
-    const result = execSync(shellCmd, {
-      encoding: 'utf-8',
-      timeout: 60000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    if (result.trim()) {
-      process.stdout.write(result);
-      // Ensure trailing newline
-      if (!result.endsWith('\n')) {
-        process.stdout.write('\n');
-      }
-    }
-  } catch (error: any) {
-    // Print stderr and exit with the same code
-    const stderr = error?.stderr?.toString?.() || '';
-    const stdout = error?.stdout?.toString?.() || '';
-    if (stdout) process.stdout.write(stdout);
-    if (stderr) process.stderr.write(stderr);
-    process.exit(error?.status || 1);
+  if (session) {
+    const entry: SessionLogEntry = {
+      action,
+      relativeTimeSec: parseFloat(((startedAt.getTime() - new Date(session.startedAt).getTime()) / 1000).toFixed(1)),
+      timestamp: startedAt.toISOString(),
+      structuredAction: {
+        command: redactedAction.args[0] ?? '',
+        args: redactedAction.args.slice(1),
+        redacted: redactedAction.secretValues.length > 0 || redactedAction.redactOutput,
+      },
+      precondition: { sessionActive: true, ...(elementData ? { element: elementData } : {}) },
+      attemptedAction: { status: 'attempted', at: startedAt.toISOString() },
+      outcome: {
+        status: timedOut ? 'timed_out' : succeeded ? 'completed' : 'failed',
+        startedAt: startedAt.toISOString(), completedAt: completedAt.toISOString(),
+        durationMs: completedAt.getTime() - startedAt.getTime(), exitCode: result.status,
+        signal: result.signal, timeout: timedOut, stdout, stderr,
+      },
+      postcondition: {
+        commandCompleted: succeeded,
+        ...(args[0] === 'screenshot' ? { screenshotExists: succeeded && fs.existsSync(resolvedArgs.at(-1) ?? '') } : {}),
+      },
+      ...(elementData ? { element: elementData } : {}),
+    };
+    const logPath = path.join(session.sessionDir, SESSION_LOG_FILENAME);
+    fs.writeFileSync(logPath, JSON.stringify([...loadSessionLog(session.sessionDir), entry], null, 2) + '\n');
   }
+  if (stdout) process.stdout.write(stdout.endsWith('\n') ? stdout : `${stdout}\n`);
+  if (stderr) process.stderr.write(stderr);
+  if (!succeeded) process.exit(result.status ?? 1);
 
   // If the action was `set viewport`, update cached viewport in session state
   if (session && args[0] === 'set' && args[1] === 'viewport') {

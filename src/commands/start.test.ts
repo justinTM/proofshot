@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { startCommand } from './start.js';
+import { browserTargetForStart, startCommand } from './start.js';
 
 const mocks = vi.hoisted(() => ({
   loadConfig: vi.fn(),
@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   generateAgentBrowserSessionName: vi.fn(),
   writeMetadata: vi.fn(),
   execSync: vi.fn(),
+  captureSourceIdentity: vi.fn(),
 }));
 
 vi.mock('../utils/config.js', () => ({
@@ -52,6 +53,10 @@ vi.mock('../session/metadata.js', () => ({
   writeMetadata: mocks.writeMetadata,
 }));
 
+vi.mock('../evidence/source.js', () => ({
+  captureSourceIdentity: mocks.captureSourceIdentity,
+}));
+
 vi.mock('child_process', () => ({
   execSync: mocks.execSync,
 }));
@@ -83,6 +88,10 @@ describe('startCommand', () => {
       if (command === 'git branch --show-current') return 'main';
       if (command === 'git rev-parse HEAD') return 'deadbeef';
       throw new Error(`unexpected command: ${command}`);
+    });
+    mocks.captureSourceIdentity.mockReturnValue({
+      kind: 'git', repository: 'https://example.test/proof.git',
+      head: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', ref: 'main', worktree: 'clean',
     });
   });
 
@@ -130,5 +139,32 @@ describe('startCommand', () => {
     expect(mocks.closeBrowser).toHaveBeenCalledTimes(1);
     expect(mocks.startRecording).not.toHaveBeenCalled();
     expect(mocks.saveSession).not.toHaveBeenCalled();
+  });
+
+  it('supports explicit no-video mode while keeping browser evidence collection active', async () => {
+    await startCommand({ video: false });
+    expect(mocks.startRecording).not.toHaveBeenCalled();
+    expect(mocks.saveSession).toHaveBeenCalledWith(expect.objectContaining({
+      videoEnabled: false,
+      recordingActive: false,
+      target: expect.objectContaining({ class: 'local', sourceRevision: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }),
+    }));
+    expect(mocks.writeMetadata).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      source: expect.objectContaining({ worktree: 'clean' }),
+      target: expect.objectContaining({ class: 'local' }),
+    }));
+  });
+
+  it('requires immutable identity for deployed read-only targets', () => {
+    const source = mocks.captureSourceIdentity();
+    expect(() => browserTargetForStart('https://deployed.test/app', source, {}))
+      .toThrow('requires --deployment-id, --build-id, and --source-revision');
+    expect(browserTargetForStart('https://deployed.test/app', source, {
+      deploymentId: 'deploy-42', buildId: 'build-42',
+      sourceRevision: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    })).toMatchObject({
+      class: 'deployed_readonly', deploymentId: 'deploy-42', buildId: 'build-42',
+      sourceRevision: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    });
   });
 });

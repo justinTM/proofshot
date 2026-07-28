@@ -1,0 +1,24 @@
+[
+  {
+    "timestamp": "2026-07-27T10:00:00Z",
+    "action": "fill @e2 person@example.test",
+    "precondition": { "focus": "email", "value": "person@example.test" },
+    "outcome": { "status": "completed", "exitCode": 0, "signal": null, "timeout": false, "stdout": "done", "stderr": "", "startedAt": "2026-07-27T10:00:00Z", "completedAt": "2026-07-27T10:00:01Z", "durationMs": 1000 },
+    "postcondition": { "focus": "submit", "value": "person@example.test" },
+    "artifacts": [
+      { "kind": "screenshot", "health": "observed", "uri": "step.png" },
+      { "kind": "accessibility", "health": "observed", "value": { "role": "form" } },
+      { "kind": "focus", "health": "observed", "value": "submit" },
+      { "kind": "keyboard", "health": "observed", "value": "Tab" },
+      { "kind": "clipboard", "health": "blocked", "reason": "permission denied", "value": "private clipboard" }
+    ],
+    "console": [{ "level": "error", "message": "render failed" }],
+    "network": [{ "method": "POST", "url": "https://deployed.test/api", "status": 500 }]
+  },
+  {
+    "timestamp": "2026-07-27T10:00:02Z",
+    "action": "click @e4",
+    "outcome": { "status": "failed", "exitCode": 1, "signal": null, "timeout": false, "stdout": "", "stderr": "element detached", "startedAt": "2026-07-27T10:00:02Z", "completedAt": "2026-07-27T10:00:03Z", "durationMs": 1000 },
+    "capture": { "consoleAttempted": true, "consoleFailed": true, "networkAttempted": false }
+  }
+]

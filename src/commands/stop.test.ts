@@ -41,7 +41,7 @@ vi.mock('../utils/process.js', () => ({
 import { stopCommand } from './stop.js';
 
 describe('stopCommand storyboard mode', () => {
-  const root = '/tmp/proofshot-stop';
+  const root = path.join(process.cwd(), '.proofshot-test-tmp', 'stop');
   const sessionDir = path.join(root, 'session');
 
   beforeEach(() => {
@@ -74,11 +74,14 @@ describe('stopCommand storyboard mode', () => {
     mocks.estimateTokenUsage.mockReturnValue(null);
     mocks.stopRecording.mockImplementation(() => {});
     mocks.closeBrowser.mockImplementation(() => {});
-    mocks.findExecutablePath.mockImplementation((command: string) =>
-      command === 'ffmpeg' ? '/usr/bin/ffmpeg' : null,
-    );
+    mocks.findExecutablePath.mockImplementation((command: string) => {
+      if (command === 'ffmpeg') return '/usr/bin/ffmpeg';
+      if (command === 'ffprobe') return '/usr/bin/ffprobe';
+      return null;
+    });
     mocks.runCommand.mockImplementation((command: string, args: string[]) => {
       const joined = args.join(' ');
+      if (command.includes('ffprobe') || joined.includes('-show_entries format=duration')) return '30.5';
       if (joined.includes('libvpx-vp9')) return 'reencoded';
       if (joined.includes('-v error -i')) {
         if (joined.includes('libvpx-vp9')) return '';
@@ -123,5 +126,82 @@ describe('stopCommand storyboard mode', () => {
 
     expect(trimCalls.some((call) => call.includes('-c copy'))).toBe(true);
     expect(trimCalls.some((call) => call.includes('libvpx-vp9'))).toBe(true);
+  });
+
+  it('stops a no-video session with reviewable logs and viewer output', async () => {
+    fs.unlinkSync(path.join(sessionDir, 'session.webm'));
+    mocks.loadSession.mockReturnValue({
+      ...mocks.loadSession.mock.results[0]?.value,
+      startedAt: '2026-04-14T00:00:00.000Z', sessionDir, sessionName: 'proofshot-test',
+      videoPath: path.join(sessionDir, 'session.webm'), serverErrorLog: path.join(sessionDir, 'server.log'),
+      serverCommand: 'npm run dev', port: 3000, description: 'no video',
+      recordingActive: false, videoEnabled: false, viewport: { width: 1280, height: 720 },
+    });
+    mocks.getConsoleOutput.mockReturnValue('[log] browser remained observable');
+
+    await stopCommand({ noClose: true });
+
+    expect(mocks.stopRecording).not.toHaveBeenCalled();
+    expect(mocks.writeViewer).toHaveBeenCalled();
+    const summary = fs.readFileSync(path.join(sessionDir, 'SUMMARY.md'), 'utf8');
+    expect(summary).toContain('[viewer.html](./viewer.html)');
+    expect(summary).toContain('Not captured');
+  });
+
+  it('reports retained media duration separately from wall-clock duration', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-14T00:00:55.000Z').getTime());
+    try {
+      await stopCommand({ noClose: true });
+    } finally {
+      now.mockRestore();
+    }
+
+    const summary = fs.readFileSync(path.join(sessionDir, 'SUMMARY.md'), 'utf8');
+    expect(summary).toContain('(30.5s retained media)');
+    expect(summary).toContain('Session wall-clock duration: 55 seconds');
+    expect(summary).toContain('Post-trim media duration: 30.5 seconds');
+    expect(mocks.writeViewer).toHaveBeenCalledWith(sessionDir, expect.objectContaining({
+      durationSec: 30.5,
+    }));
+  });
+
+  it('reports blocked console collection instead of a false clean result', async () => {
+    mocks.getConsoleErrors.mockImplementation(() => { throw new Error('browser disconnected'); });
+
+    await stopCommand({ noClose: true });
+
+    const summary = fs.readFileSync(path.join(sessionDir, 'SUMMARY.md'), 'utf8');
+    expect(summary).toContain('Status: **blocked**');
+    expect(summary).toContain('No clean console result is claimed');
+    expect(summary).not.toContain('No console errors detected');
+    expect(mocks.writeViewer).toHaveBeenCalledWith(sessionDir, expect.objectContaining({
+      consoleCaptureHealth: 'blocked',
+      networkCaptureHealth: 'not_observed',
+    }));
+  });
+
+  it('shows target, deployment, and source identity in the human summary', async () => {
+    fs.writeFileSync(path.join(sessionDir, 'metadata.json'), JSON.stringify({
+      branch: 'main', commitSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      startedAt: '2026-04-14T00:00:00.000Z', description: 'deployed proof',
+      target: {
+        class: 'deployed_readonly', url: 'https://deployed.test/app', origin: 'https://deployed.test',
+        deploymentId: 'deploy-42', buildId: 'build-42',
+        sourceRevision: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+      source: {
+        kind: 'git', repository: 'https://example.test/repo.git',
+        head: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', ref: 'main', worktree: 'clean',
+      },
+      runtime: { browser: { name: 'chromium' }, driver: { name: 'agent-browser', version: '1.2.3' } },
+    }));
+
+    await stopCommand({ noClose: true });
+
+    const summary = fs.readFileSync(path.join(sessionDir, 'SUMMARY.md'), 'utf8');
+    expect(summary).toContain('Target boundary: deployed_readonly');
+    expect(summary).toContain('Deployment: deploy-42');
+    expect(summary).toContain('Build: build-42');
+    expect(summary).toContain('Observed source: https://example.test/repo.git');
   });
 });

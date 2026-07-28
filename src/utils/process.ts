@@ -27,8 +27,9 @@ export function runCommand(
   command: string,
   args: string[] = [],
   options: SpawnSyncOptions = {},
+  spawnFn: typeof spawnSync = spawnSync,
 ): string {
-  const result = spawnSync(command, args, {
+  const result = spawnFn(command, args, {
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
     ...options,

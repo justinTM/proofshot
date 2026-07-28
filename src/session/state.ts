@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import type { SourceIdentity } from '../evidence/contract.js';
+import type { BrowserRuntimeProvenance, BrowserTargetProvenance } from '../browser/evidence.js';
 
 const SESSION_FILENAME = '.session.json';
 
@@ -15,7 +17,12 @@ export interface SessionState {
   serverCommand: string | null;
   serverAlreadyRunning: boolean;
   recordingActive: boolean;
+  /** False only when start was explicitly invoked with --no-video. */
+  videoEnabled?: boolean;
   viewport?: { width: number; height: number };
+  source?: SourceIdentity;
+  target?: BrowserTargetProvenance;
+  runtime?: BrowserRuntimeProvenance;
 }
 
 /**

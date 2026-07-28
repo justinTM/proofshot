@@ -1,6 +1,5 @@
 import * as path from 'path';
 import chalk from 'chalk';
-import { execSync } from 'child_process';
 import { loadConfig } from '../utils/config.js';
 import { setAgentBrowserDefaults } from '../utils/exec.js';
 import { ensureDevServer } from '../server/start.js';
@@ -14,6 +13,12 @@ import {
   generateAgentBrowserSessionName,
 } from '../session/state.js';
 import { writeMetadata } from '../session/metadata.js';
+import { captureSourceIdentity } from '../evidence/source.js';
+import type { SourceIdentity } from '../evidence/contract.js';
+import type { BrowserRuntimeProvenance, BrowserTargetClass, BrowserTargetProvenance } from '../browser/evidence.js';
+import { readCommandVersion } from '../utils/process.js';
+import { PROOFSHOT_VERSION } from '../version.js';
+import { redactBrowserUrl } from '../browser/redact.js';
 
 interface StartOptions {
   description?: string;
@@ -23,6 +28,42 @@ interface StartOptions {
   output?: string;
   url?: string;
   force?: boolean;
+  video?: boolean;
+  targetClass?: BrowserTargetClass;
+  deploymentId?: string;
+  buildId?: string;
+  sourceRevision?: string;
+}
+
+function isLoopbackTarget(url: URL): boolean {
+  return url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
+}
+
+export function browserTargetForStart(
+  openUrl: string,
+  source: SourceIdentity,
+  options: Pick<StartOptions, 'targetClass' | 'deploymentId' | 'buildId' | 'sourceRevision'>,
+): BrowserTargetProvenance {
+  const url = new URL(openUrl);
+  const targetClass = options.targetClass ?? (isLoopbackTarget(url) ? 'local' : 'deployed_readonly');
+  if (targetClass === 'local' && !isLoopbackTarget(url)) {
+    throw new Error('A local browser target must use localhost or a loopback address');
+  }
+  if (targetClass === 'deployed_readonly'
+    && (!options.deploymentId || !options.buildId || !options.sourceRevision)) {
+    throw new Error('A deployed browser target requires --deployment-id, --build-id, and --source-revision');
+  }
+  const localGitSource = targetClass === 'local' && source.kind === 'git' ? source : undefined;
+  const safeUrl = redactBrowserUrl(url.href).url;
+  return {
+    class: targetClass,
+    url: safeUrl,
+    origin: url.origin,
+    deploymentId: options.deploymentId,
+    buildId: options.buildId,
+    sourceRevision: options.sourceRevision ?? localGitSource?.head,
+    sourceDiffDigest: localGitSource?.worktree === 'dirty' ? localGitSource.diffDigest : undefined,
+  };
 }
 
 export async function startCommand(options: StartOptions): Promise<void> {
@@ -58,31 +99,26 @@ export async function startCommand(options: StartOptions): Promise<void> {
   const videoPath = path.join(sessionDir, 'session.webm');
   const serverErrorLog = path.join(sessionDir, 'server.log');
 
-  let branch = '';
-  let commitSha = '';
+  const source = captureSourceIdentity();
+  const branch = source.kind === 'git' ? source.ref ?? '' : '';
+  const commitSha = source.kind === 'git' ? source.head : '';
+  const runtime: BrowserRuntimeProvenance = {
+    browser: { name: 'chromium' },
+    driver: { name: 'agent-browser', version: readCommandVersion('agent-browser') ?? undefined },
+    configurationVersion: `proofshot:${PROOFSHOT_VERSION}`,
+    viewport: { width: config.viewport.width, height: config.viewport.height },
+    renderSettings: { headless: config.headless },
+  };
+  const baseUrl = `http://localhost:${config.devServer.port}`;
+  const openUrl = options.url || baseUrl;
+  let target: BrowserTargetProvenance;
   try {
-    branch = execSync('git branch --show-current', {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-  } catch {
-    // Non-fatal outside a git repo.
+    target = browserTargetForStart(openUrl, source, options);
+  } catch (error: any) {
+    console.error(chalk.red('✗') + ` Invalid proof target: ${error.message}`);
+    process.exit(1);
+    return;
   }
-  try {
-    commitSha = execSync('git rev-parse HEAD', {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-  } catch {
-    // Non-fatal outside a git repo.
-  }
-
-  writeMetadata(sessionDir, {
-    branch,
-    commitSha,
-    startedAt: new Date().toISOString(),
-    description: options.description || null,
-  });
 
   let serverAlreadyRunning = true;
 
@@ -106,8 +142,21 @@ export async function startCommand(options: StartOptions): Promise<void> {
     console.log(chalk.dim('No --run provided, assuming server is already running'));
   }
 
-  const baseUrl = `http://localhost:${config.devServer.port}`;
-  const openUrl = options.url || baseUrl;
+  writeMetadata(sessionDir, {
+    branch,
+    commitSha,
+    startedAt: new Date().toISOString(),
+    description: options.description || null,
+    source,
+    target,
+    runtime,
+    captureHealth: {
+      console: 'not_observed',
+      network: 'not_observed',
+      consoleReason: 'Collection has not completed',
+      networkReason: 'Network collection is not configured for this session',
+    },
+  });
 
   console.log(chalk.dim('Opening browser...'));
   try {
@@ -123,12 +172,13 @@ export async function startCommand(options: StartOptions): Promise<void> {
     process.exit(1);
   }
 
+  const videoEnabled = options.video !== false;
   const RECORDING_RETRIES = 3;
   const RETRY_DELAY_MS = 2000;
   let recordingStarted = false;
   let lastError: any;
 
-  for (let attempt = 1; attempt <= RECORDING_RETRIES; attempt++) {
+  for (let attempt = 1; videoEnabled && attempt <= RECORDING_RETRIES; attempt++) {
     try {
       startRecording(videoPath, sessionName);
       recordingStarted = true;
@@ -146,7 +196,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
     }
   }
 
-  if (!recordingStarted) {
+  if (videoEnabled && !recordingStarted) {
     closeBrowser();
     console.error(
       chalk.red('✗') +
@@ -171,8 +221,12 @@ export async function startCommand(options: StartOptions): Promise<void> {
     port: config.devServer.port,
     serverCommand: options.run || null,
     serverAlreadyRunning,
-    recordingActive: true,
+    recordingActive: recordingStarted,
+    videoEnabled,
     viewport: { width: config.viewport.width, height: config.viewport.height },
+    source,
+    target,
+    runtime,
   });
 
   console.log('');
@@ -180,8 +234,11 @@ export async function startCommand(options: StartOptions): Promise<void> {
   console.log('');
   console.log(`Server:     ${options.run ? chalk.cyan(options.run) : chalk.dim('external')} on :${config.devServer.port}`);
   console.log(`Browser:    Chromium (${config.headless ? 'headless' : 'headed'})`);
+  console.log(`Target:     ${target.class} ${target.url}`);
+  if (target.deploymentId) console.log(`Deployment: ${target.deploymentId} (build ${target.buildId})`);
+  console.log(`Source:     ${target.sourceRevision ?? 'not comparable'}`);
   console.log(`Session:    ${chalk.dim(sessionName)}`);
-  console.log(`Recording:  ${chalk.dim(videoPath)}`);
+  console.log(`Recording:  ${videoEnabled ? chalk.dim(videoPath) : chalk.dim('disabled (--no-video)')}`);
   console.log(`Errors log: ${chalk.dim(serverErrorLog)}`);
 
   if (options.description) {

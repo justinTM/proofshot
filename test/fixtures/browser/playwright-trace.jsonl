@@ -1,0 +1,9 @@
+{"type":"action","name":"click submit","status":"completed","startTime":"2026-07-27T11:00:00Z","time":"2026-07-27T11:00:01Z","exitCode":0,"formValue":"private form value"}
+{"type":"capture","kind":"screenshot","status":"completed","uri":"after.png","time":"2026-07-27T11:00:01Z"}
+{"type":"capture","kind":"dom","status":"completed","value":{"focus":"submit","value":"private form value"},"time":"2026-07-27T11:00:01Z"}
+{"type":"capture","kind":"accessibility","status":"completed","value":{"role":"button","name":"Submit"},"time":"2026-07-27T11:00:01Z"}
+{"type":"capture","kind":"clipboard","status":"blocked","reason":"permission denied","value":"private clipboard","time":"2026-07-27T11:00:01Z"}
+{"type":"capture","kind":"console","status":"failed","reason":"listener disconnected","time":"2026-07-27T11:00:02Z"}
+{"type":"capture","kind":"network","status":"completed","time":"2026-07-27T11:00:02Z"}
+{"type":"console","level":"error","message":"uncaught","time":"2026-07-27T11:00:02Z"}
+{"type":"network","method":"GET","url":"https://deployed.test/api","status":503,"time":"2026-07-27T11:00:02Z"}
