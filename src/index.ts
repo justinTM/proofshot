@@ -12,3 +12,26 @@ export { writeMetadata, loadMetadata, findSessionsForBranch, type SessionMetadat
 export { formatPRComment, type PRCommentData } from './artifacts/pr-format.js';
 export * from './evidence/contract.js';
 export { compileProofBundle, sha256Digest, validateProofBundle } from './evidence/validate.js';
+export {
+  captureTerminal,
+  type CaptureTerminalOptions,
+  type GeneratedArtifactInput,
+} from './terminal/adapter.js';
+export {
+  importOdoCliMatrix,
+  type DeclaredTerminalContext,
+  type ImportedGeneratedArtifact,
+  type ImportedKeystroke,
+  type ImportOdoOptions,
+  type OdoRunResult,
+} from './terminal/import-odo.js';
+export {
+  redactArgv,
+  redactArgvWithManifest,
+  redactEnvironment,
+  redactText,
+  redactTextDetailed,
+  scanResidualSecrets,
+  type RedactionPolicy,
+} from './terminal/redact.js';
+export * from './terminal/types.js';
